@@ -186,28 +186,25 @@ public final class DirectorServer {
             return;
         }
         DirectorTarget locked = lockedTarget(server, cfg);
-        long interval = Math.max(40L,
-                s.holdTicks > 0 ? s.holdTicks : Math.max(5, cfg.rotationIntervalSec) * 20L);
-        // Only re-roll when there is actually something to change: more than one
-        // target, or more than one shot in the pool. With a single target and the
-        // default single-shot pool this keeps ONE continuous angle forever (no
-        // re-announce, no re-blend, no bounce every interval).
-        boolean rotate = candidates.size() > 1 || cfg.pool.size() > 1;
+        long shotInterval = Math.max(40L, Math.max(5, cfg.rotationIntervalSec) * 20L);
+        long targetInterval = Math.max(5, cfg.targetRotateSec) * 20L;
         if (locked != null) {
             ServerPlayer lt = locked.resolve(server);
             boolean newTarget = s.current == null || !locked.uuid().equals(s.current.uuid());
-            // Locked target: only re-roll if the *pool* has multiple shots. Never
-            // rotate the angle just because other players are online.
-            boolean poolRotates = cfg.pool.size() > 1;
-            if (lt != null && (newTarget || (poolRotates && s.ticksSinceSwitch >= interval))) {
-                beginShot(s, locked, lt, cfg);
+            boolean poolRotates = cfg.pool.size() > 1 && s.ticksSinceSwitch >= shotInterval;
+            if (lt != null && (newTarget || poolRotates)) {
+                beginShot(s, locked, lt, cfg, newTarget);
                 s.ticksSinceSwitch = 0;
                 s.shotTick = 0;
                 announce(cam, s);
             }
         } else {
             boolean stale = s.current == null || !s.current.isValid(server);
-            if (stale || (rotate && s.ticksSinceSwitch >= interval)) {
+            // Group mode: rotate the followed player on a slow timer (default 3 min),
+            // separately from the shot hold. Switch with a hard cut.
+            boolean targetDue = candidates.size() > 1 && s.ticksSinceSwitch >= targetInterval;
+            boolean shotDue = cfg.pool.size() > 1 && s.ticksSinceSwitch >= shotInterval;
+            if (stale || targetDue || shotDue) {
                 roundRobin = (roundRobin + 1) % candidates.size();
                 DirectorTarget pick = candidates.get(Math.floorMod(roundRobin, candidates.size()));
                 if (s.current != null && candidates.size() > 1) {
@@ -220,8 +217,9 @@ public final class DirectorServer {
                         }
                     }
                 }
+                boolean targetChanged = s.current == null || !pick.uuid().equals(s.current.uuid());
                 ServerPlayer pt = pick.resolve(server);
-                if (pt != null) beginShot(s, pick, pt, cfg);
+                if (pt != null) beginShot(s, pick, pt, cfg, targetChanged);
                 s.ticksSinceSwitch = 0;
                 s.shotTick = 0;
                 announce(cam, s);
@@ -261,8 +259,10 @@ public final class DirectorServer {
         cam.fallDistance = 0f;
     }
 
-    private void beginShot(Session s, DirectorTarget pick, ServerPlayer target, SConfig cfg) {
-        s.blendFrom = s.pose;
+    private void beginShot(Session s, DirectorTarget pick, ServerPlayer target, SConfig cfg, boolean cut) {
+        // A target change is a hard cut (no 3s glide across the map); a shot change
+        // within the same player blends smoothly.
+        s.blendFrom = cut ? null : s.pose;
         s.blendTick = 0;
         s.armScale = 1.0;
         s.current = pick;

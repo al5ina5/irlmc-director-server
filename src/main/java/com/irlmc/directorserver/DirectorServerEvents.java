@@ -68,6 +68,9 @@ public final class DirectorServerEvents {
                 .then(Commands.literal("interval")
                         .then(Commands.argument("seconds", IntegerArgumentType.integer(5, 300))
                                 .executes(DirectorServerEvents::interval)))
+                .then(Commands.literal("rotate")
+                        .then(Commands.argument("seconds", IntegerArgumentType.integer(5, 3600))
+                                .executes(DirectorServerEvents::rotate)))
                 .then(Commands.literal("target")
                         .then(Commands.argument("player", StringArgumentType.word())
                                 .suggests((ctx, b) -> SharedSuggestionProvider.suggest(
@@ -161,6 +164,14 @@ public final class DirectorServerEvents {
         SConfig.get().rotationIntervalSec = s;
         SConfig.get().save();
         ctx.getSource().sendSuccess(() -> Component.literal("Director interval = " + s + "s"), false);
+        return 1;
+    }
+
+    private static int rotate(CommandContext<CommandSourceStack> ctx) {
+        int s = IntegerArgumentType.getInteger(ctx, "seconds");
+        SConfig.get().targetRotateSec = s;
+        SConfig.get().save();
+        ctx.getSource().sendSuccess(() -> Component.literal("Target rotates every " + s + "s"), false);
         return 1;
     }
 
