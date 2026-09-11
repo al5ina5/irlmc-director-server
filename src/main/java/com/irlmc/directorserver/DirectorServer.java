@@ -188,12 +188,15 @@ public final class DirectorServer {
         DirectorTarget locked = lockedTarget(server, cfg);
         long interval = Math.max(40L,
                 s.holdTicks > 0 ? s.holdTicks : Math.max(5, cfg.rotationIntervalSec) * 20L);
+        // Only re-roll when there is actually something to change: more than one
+        // target, or more than one shot in the pool. With a single target and the
+        // default single-shot pool this keeps ONE continuous angle forever (no
+        // re-announce, no re-blend, no bounce every interval).
+        boolean rotate = candidates.size() > 1 || cfg.pool.size() > 1;
         if (locked != null) {
             ServerPlayer lt = locked.resolve(server);
             boolean newTarget = s.current == null || !locked.uuid().equals(s.current.uuid());
-            if (lt != null && (newTarget || s.ticksSinceSwitch >= interval)) {
-                // Same player, but time to roll a new angle. Keep rotating even
-                // when locked (locking pins the *player*, not the shot).
+            if (lt != null && (newTarget || (rotate && s.ticksSinceSwitch >= interval))) {
                 beginShot(s, locked, lt, cfg);
                 s.ticksSinceSwitch = 0;
                 s.shotTick = 0;
@@ -201,7 +204,7 @@ public final class DirectorServer {
             }
         } else {
             boolean stale = s.current == null || !s.current.isValid(server);
-            if (stale || s.ticksSinceSwitch >= interval) {
+            if (stale || (rotate && s.ticksSinceSwitch >= interval)) {
                 roundRobin = (roundRobin + 1) % candidates.size();
                 DirectorTarget pick = candidates.get(Math.floorMod(roundRobin, candidates.size()));
                 if (s.current != null && candidates.size() > 1) {
@@ -329,7 +332,12 @@ public final class DirectorServer {
         Vec3 upv = right.cross(dir).normalize();
 
         double r = cfg.armRadius;
-        Vec3[] offs = {Vec3.ZERO, right.scale(r), right.scale(-r), upv.scale(r), upv.scale(-r)};
+        Vec3[] offs = {
+                Vec3.ZERO,
+                right.scale(r), right.scale(-r), upv.scale(r), upv.scale(-r),
+                right.scale(r).add(upv.scale(r)), right.scale(-r).add(upv.scale(r)),
+                right.scale(r).add(upv.scale(-r)), right.scale(-r).add(upv.scale(-r)),
+        };
         double hitFrac = 1.0;
         for (Vec3 off : offs) {
             var hit = target.level().clip(new ClipContext(anchor.add(off), desired.add(off),
@@ -340,14 +348,16 @@ public final class DirectorServer {
             }
         }
 
-        double minScale = Mth.clamp(cfg.armMin / idealLen, 0.0, 1.0);
-        double maxScale = Mth.clamp(hitFrac - cfg.armMargin / idealLen, minScale, 1.0);
+        // Hard ceiling on how far the arm may extend: never past the obstruction.
+        // (The old code clamped to armMin, which pushed the camera *through* close
+        // walls — that was the "goes through walls" bug.)
+        double maxScale = Mth.clamp(hitFrac - cfg.armMargin / idealLen, 0.0, 1.0);
         if (maxScale < s.armScale) {
-            s.armScale += (maxScale - s.armScale) * Mth.clamp(cfg.armRetract, 0.0, 1.0);
+            s.armScale = maxScale; // retract instantly: never clip
         } else {
             s.armScale += (maxScale - s.armScale) * Mth.clamp(cfg.armExtend, 0.0, 1.0);
         }
-        s.armScale = Mth.clamp(s.armScale, minScale, 1.0);
+        s.armScale = Math.min(Mth.clamp(s.armScale, 0.0, 1.0), maxScale);
 
         long now = System.currentTimeMillis();
         if (s.armScale < 0.85 && now - s.lastArmLog > 1000) {
@@ -364,8 +374,28 @@ public final class DirectorServer {
             double gy = down.getLocation().y + cfg.armMargin;
             if (cam.y < gy) cam = new Vec3(cam.x, gy, cam.z);
         }
+        // Final safety: if the camera still landed inside a solid block, walk it
+        // back toward the target until it is clear.
+        cam = resolveOverlap(target, anchor, cam, dir);
         float[] look = Shots.lookAt(cam, anchor);
         return new Shots.Pose(cam, look[0], look[1]);
+    }
+
+    private Vec3 resolveOverlap(ServerPlayer target, Vec3 anchor, Vec3 cam, Vec3 dir) {
+        for (int i = 0; i < 10 && insideSolid(target, cam); i++) {
+            if (cam.distanceToSqr(anchor) < 0.16) {
+                return anchor.add(0, 0.4, 0);
+            }
+            cam = cam.subtract(dir.scale(0.3));
+        }
+        return cam;
+    }
+
+    private boolean insideSolid(ServerPlayer target, Vec3 p) {
+        var bp = net.minecraft.core.BlockPos.containing(p);
+        var state = target.level().getBlockState(bp);
+        if (state.isAir()) return false;
+        return !state.getCollisionShape(target.level(), bp).isEmpty();
     }
 
     // ---- persistence (survive server restarts) ----
