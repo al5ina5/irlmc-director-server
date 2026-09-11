@@ -1,0 +1,25 @@
+modLoader="javafml"
+loaderVersion="[2,)"
+license="MIT"
+
+[[mods]]
+modId="irlmc_director_server"
+version="0.2.0"
+displayName="IRL-MC Director Server"
+displayURL=""
+authors="irl-mc"
+description="Server-side cinematic camera: teleports a camera account (or you) through orbit/flyby/crane/follow shots, rotating players. Vanilla clients."
+
+[[dependencies."irlmc_director_server"]]
+modId="neoforge"
+type="required"
+versionRange="[26.1.2,)"
+ordering="NONE"
+side="SERVER"
+
+[[dependencies."irlmc_director_server"]]
+modId="minecraft"
+type="required"
+versionRange="[26.1.2,)"
+ordering="NONE"
+side="SERVER"

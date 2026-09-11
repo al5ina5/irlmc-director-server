@@ -1,0 +1,153 @@
+package com.irlmc.directorserver;
+
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import com.mojang.brigadier.context.CommandContext;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.permissions.Permission;
+import net.minecraft.server.permissions.PermissionLevel;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.fml.common.EventBusSubscriber;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.neoforged.neoforge.server.ServerLifecycleHooks;
+
+/**
+ * All game-bus wiring. Works with vanilla clients (spectator + teleport only).
+ */
+@EventBusSubscriber(modid = IrlmcDirectorServer.MOD_ID)
+public final class DirectorServerEvents {
+
+    @SubscribeEvent
+    public static void onServerTick(ServerTickEvent.Post event) {
+        DirectorServer.get().tick(event.getServer());
+    }
+
+    @SubscribeEvent
+    public static void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
+        // Hold the session; it resumes (or restores on next login).
+    }
+
+    @SubscribeEvent
+    public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
+        if (!(event.getEntity() instanceof ServerPlayer pl)) return;
+        var server = ServerLifecycleHooks.getCurrentServer();
+        if (DirectorServer.get().isDirecting(pl.getUUID())) {
+            // Logged out mid-direct: restore where they were.
+            DirectorServer.get().stop(server, pl.getUUID(), true);
+            return;
+        }
+        DirectorServer.get().restoreOne(server, pl.getUUID());
+        // Headless camera account: start directing automatically (no /director needed).
+        SConfig cfg = SConfig.get();
+        if (cfg.autoCamera && !cfg.cameraAccount.isEmpty()
+                && pl.getName().getString().equalsIgnoreCase(cfg.cameraAccount)) {
+            DirectorServer.get().start(server, pl);
+        }
+    }
+
+    @SubscribeEvent
+    public static void onRegisterCommands(RegisterCommandsEvent event) {
+        var d = event.getDispatcher();
+        d.register(Commands.literal("director")
+                .requires(DirectorServerEvents::permitted)
+                .executes(DirectorServerEvents::status)
+                .then(Commands.literal("on").executes(DirectorServerEvents::on))
+                .then(Commands.literal("off").executes(DirectorServerEvents::off))
+                .then(Commands.literal("next").executes(DirectorServerEvents::next))
+                .then(Commands.literal("status").executes(DirectorServerEvents::status))
+                .then(Commands.literal("interval")
+                        .then(Commands.argument("seconds", IntegerArgumentType.integer(5, 300))
+                                .executes(DirectorServerEvents::interval)))
+                .then(Commands.literal("target")
+                        .then(Commands.argument("player", StringArgumentType.word())
+                                .suggests((ctx, b) -> SharedSuggestionProvider.suggest(
+                                        ctx.getSource().getOnlinePlayerNames(), b))
+                                .executes(DirectorServerEvents::target))
+                        .then(Commands.literal("clear").executes(DirectorServerEvents::targetClear))));
+    }
+
+    private static boolean permitted(CommandSourceStack src) {
+        int level = Math.max(0, Math.min(4, SConfig.get().permissionLevel));
+        PermissionLevel[] levels = PermissionLevel.values();
+        return src.permissions().hasPermission(
+                new Permission.HasCommandLevel(levels[Math.min(level, levels.length - 1)]));
+    }
+
+    private static int needPlayer(CommandSourceStack src) {
+        if (!(src.getEntity() instanceof ServerPlayer)) {
+            src.sendFailure(Component.literal("Only a player can use /director."));
+            return -1;
+        }
+        return 1;
+    }
+
+    private static int on(CommandContext<CommandSourceStack> ctx) {
+        if (needPlayer(ctx.getSource()) < 0) return 0;
+        ServerPlayer cam = (ServerPlayer) ctx.getSource().getEntity();
+        DirectorServer.get().start(ctx.getSource().getServer(), cam);
+        return 1;
+    }
+
+    private static int off(CommandContext<CommandSourceStack> ctx) {
+        if (needPlayer(ctx.getSource()) < 0) return 0;
+        ServerPlayer cam = (ServerPlayer) ctx.getSource().getEntity();
+        DirectorServer.get().stop(ctx.getSource().getServer(), cam.getUUID(), true);
+        return 1;
+    }
+
+    private static int next(CommandContext<CommandSourceStack> ctx) {
+        if (needPlayer(ctx.getSource()) < 0) return 0;
+        ServerPlayer cam = (ServerPlayer) ctx.getSource().getEntity();
+        DirectorServer.get().nextNow(cam.getUUID());
+        ctx.getSource().sendSuccess(() -> Component.literal("Switching target…"), false);
+        return 1;
+    }
+
+    private static int status(CommandContext<CommandSourceStack> ctx) {
+        var src = ctx.getSource();
+        if (src.getEntity() instanceof ServerPlayer cam) {
+            src.sendSuccess(() -> Component.literal(
+                    DirectorServer.get().status(src.getServer(), cam.getUUID())), false);
+        } else {
+            // Console: list all active directors.
+            src.sendSuccess(() -> Component.literal("Use in-game. Active directors are listed in console log."), false);
+        }
+        return 1;
+    }
+
+    private static int interval(CommandContext<CommandSourceStack> ctx) {
+        int s = IntegerArgumentType.getInteger(ctx, "seconds");
+        SConfig.get().rotationIntervalSec = s;
+        SConfig.get().save();
+        ctx.getSource().sendSuccess(() -> Component.literal("Director interval = " + s + "s"), false);
+        return 1;
+    }
+
+    private static int target(CommandContext<CommandSourceStack> ctx) {
+        String name = StringArgumentType.getString(ctx, "player");
+        var server = ctx.getSource().getServer();
+        boolean online = server.getPlayerList().getPlayers().stream()
+                .anyMatch(p -> p.getName().getString().equalsIgnoreCase(name));
+        if (!online) {
+            ctx.getSource().sendFailure(Component.literal("Player '" + name + "' is not online."));
+            return 0;
+        }
+        SConfig.get().targetName = name;
+        SConfig.get().save();
+        ctx.getSource().sendSuccess(() -> Component.literal("Director locked to " + name), false);
+        return 1;
+    }
+
+    private static int targetClear(CommandContext<CommandSourceStack> ctx) {
+        SConfig.get().targetName = "";
+        SConfig.get().save();
+        ctx.getSource().sendSuccess(() -> Component.literal("Director back to auto-rotate."), false);
+        return 1;
+    }
+}

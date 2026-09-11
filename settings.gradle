@@ -1,0 +1,13 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.neoforged.net/releases/' }
+    }
+}
+dependencyResolutionManagement {
+    repositories {
+        mavenCentral()
+        maven { url = 'https://maven.neoforged.net/releases/' }
+    }
+}
+rootProject.name = 'irlmc-director-server'

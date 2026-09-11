@@ -1,0 +1,66 @@
+plugins {
+    id 'java'
+    id 'net.neoforged.moddev' version "${moddev_plugin_version}"
+}
+
+group = 'com.irlmc'
+version = "${mod_version}"
+
+java {
+    // NeoForge 26.x / MC 26.x requires Java 25 everywhere.
+    toolchain { languageVersion = JavaLanguageVersion.of(25) }
+}
+
+neoForge {
+    version = "${neoforge_version}"
+    validateAccessTransformers = false
+    runs {
+        server {
+            server()
+        }
+        camera {
+            client()
+            jvmArgument('-Xmx2G');
+            jvmArgument('-Xms1G');
+            // Headless camera rig (Xvfb). Overridable: CAMNAME/CAMHOST/CAMPORT.
+            programArgument('--username');
+            programArgument(System.getenv('CAMNAME') ?: 'DirectorCam');
+            programArgument('--server');
+            programArgument(System.getenv('CAMHOST') ?: 'localhost');
+            programArgument('--port');
+            programArgument(System.getenv('CAMPORT') ?: '25565');
+        }
+        dummy {
+            client()
+            jvmArgument('-Xmx1G');
+            jvmArgument('-Xms512M');
+            gameDirectory.set(file('run-dummy'));
+            programArgument('--username');
+            programArgument(System.getenv('CAMNAME') ?: 'TargetDummy');
+            programArgument('--server');
+            programArgument(System.getenv('CAMHOST') ?: 'localhost');
+            programArgument('--port');
+            programArgument(System.getenv('CAMPORT') ?: '25565');
+        }
+        camprod {
+            // Production headless camera: 720p window on Xvfb :99.
+            client()
+            jvmArgument('-Xmx2G');
+            jvmArgument('-Xms1G');
+            gameDirectory.set(file('run-camprod'));
+            programArgument('--username');
+            programArgument('directorcam');
+            programArgument('--width');
+            programArgument('1280');
+            programArgument('--height');
+            programArgument('720');
+        }
+    }
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+// Official Mojang mappings are used automatically (derived from neoForge.version).
