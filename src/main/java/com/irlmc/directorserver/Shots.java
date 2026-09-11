@@ -254,22 +254,24 @@ public final class Shots {
 
             Vec3 aim = new Vec3(tp.x, tp.y + cfg.camAimHeight, tp.z);
 
-            // Is the elevated "drone" pose viable? In the open it is (openness 1),
-            // so we keep the high/wide view. Under a canopy / in tight woods it is
-            // blocked (openness -> 0), so we drop to a ground-level, person-height
-            // follow — like someone filming on foot instead of a drone.
-            Vec3 highIdeal = camAt(tp, dirX, dirZ, 0.0, cfg.steadyDistance, cfg.steadyHeight);
-            double highClear = clearFraction(target, aim, highIdeal);
-            double headReach = cfg.steadyHeight + 1.0;
+            // How much clear vertical room do we have above the aim point? This is
+            // the single most important signal: not enough headroom -> the camera
+            // must hug the ground, no matter how open it looks horizontally. The
+            // ray reaches well past the max height so open sky reads as "lots".
+            double headReach = Math.max(cfg.steadyHeight + 4.0, 12.0);
             double headClear = clearFraction(target, aim, aim.add(0, headReach, 0));
-            double openness = Math.min(highClear, headClear);
+            double headroom = headClear * headReach;
+            double ceilingY = aim.y + headroom;
+
+            // Only rise to the high/wide view when there is a LOT of headroom
+            // (genuinely open sky). Anything with a low-ish ceiling — rooms, woods,
+            // caves — clamps hard to the low person-height shot.
+            double openness = Mth.clamp((headroom - 6.0) / 4.0, 0.0, 1.0);
+            openness = openness * openness * (3.0 - 2.0 * openness); // smoothstep
 
             double desiredHeight = Mth.lerp(openness, cfg.camLowHeight, cfg.steadyHeight);
-            // Hard rule: never sit above the ceiling (minus margin). This is what
-            // keeps the camera out of low overheads/foliage instead of clipping.
-            double ceilingY = aim.y + headClear * headReach;
             double maxHeight = (ceilingY - cfg.armMargin) - tp.y;
-            double height = Math.min(desiredHeight, Math.max(0.5, maxHeight));
+            double height = Math.max(0.5, Math.min(desiredHeight, maxHeight));
             double dist = Mth.lerp(openness, cfg.camLowDistance, cfg.steadyDistance);
 
             // Weave: try a wide fan of headings and steer toward the clearest gap,
@@ -295,12 +297,11 @@ public final class Shots {
             weaveOffsetDeg = applied;
 
             Vec3 cam = camAt(tp, dirX, dirZ, applied, dist, height);
-            if (openness < 0.5 && cfg.camWeave
-                    && System.currentTimeMillis() - lastModeLog > 1000) {
+            if (openness < 0.9 && System.currentTimeMillis() - lastModeLog > 1000) {
                 lastModeLog = System.currentTimeMillis();
-                LOG.info("Follow ground-mode: openness={} height={} dist={} weave={}",
-                        String.format("%.2f", openness), String.format("%.1f", height),
-                        String.format("%.1f", dist), String.format("%.0f", applied));
+                LOG.info(String.format(
+                        "Follow: headroom=%.1f open=%.2f height=%.2f (desired=%.2f cap=%.2f) dist=%.1f weave=%.0f",
+                        headroom, openness, height, desiredHeight, maxHeight, dist, applied));
             }
             float[] look = lookAt(cam, aim);
             return new Pose(cam, look[0], look[1]);

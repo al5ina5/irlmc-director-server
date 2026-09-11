@@ -262,12 +262,11 @@ public final class DirectorServer {
     }
 
     private void beginShot(Session s, DirectorTarget pick, ServerPlayer target, SConfig cfg, boolean cut) {
-        // A target change is a hard cut (no 3s glide across the map); a shot change
-        // within the same player blends smoothly.
-        s.blendFrom = cut ? null : s.pose;
+        // Always blend: a hard cut reads as a warp to viewers. For a far target
+        // switch the blend becomes a fast glide, but it still interpolates.
+        s.blendFrom = s.pose;
         s.blendTick = 0;
         s.armScale = 1.0;
-        s.lastCam = null;
         s.current = pick;
         s.currentType = scheduler.pick(cfg, s.currentType);
         s.holdTicks = Math.max(5, cfg.rotationIntervalSec) * 20L;
@@ -374,39 +373,13 @@ public final class DirectorServer {
         }
 
         Vec3 cam = anchor.add(dir.scale(idealLen * s.armScale));
-        // Resolve overlaps, apply vertical limits (ground AND ceiling), then
-        // re-resolve in case lowering pushed the camera into something.
+        // Resolve overlaps, then apply vertical limits (ground AND ceiling), then
+        // re-resolve. No swept guard: holding the previous position and then
+        // snapping when clear reads as a "warp", so we rely on per-tick clearance
+        // plus the vertical clamp instead.
         cam = resolveOverlap(target, anchor, cam, dir);
-        Vec3 preClamp = cam;
         cam = clampVertical(target, cam, cfg);
-        boolean verticalClamped = Math.abs(cam.y - preClamp.y) > 1.0e-3;
         cam = resolveOverlap(target, anchor, cam, dir);
-
-        // Swept guard: never cross a block between ticks. The client interpolates
-        // the segment between server positions, so if this segment is clear the
-        // rendered path cannot pass through trees or walls while moving.
-        boolean sweepHit = false;
-        if (s.lastCam != null) {
-            var sweep = target.level().clip(new ClipContext(s.lastCam, cam,
-                    ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, target));
-            if (sweep.getType() == HitResult.Type.BLOCK) {
-                Vec3 step = cam.subtract(s.lastCam);
-                double len = step.length();
-                if (len > 1.0e-4) {
-                    double f = Math.max(0.0,
-                            (s.lastCam.distanceTo(sweep.getLocation()) - cfg.armMargin) / len);
-                    cam = s.lastCam.add(step.scale(f));
-                    sweepHit = true;
-                }
-            }
-        }
-        s.lastCam = cam;
-
-        if ((verticalClamped || sweepHit) && now - s.lastArmLog > 1000) {
-            s.lastArmLog = now;
-            LOG.info("Camera clamp: vertical={} sweep={} camY={}",
-                    verticalClamped, sweepHit, String.format("%.2f", cam.y));
-        }
 
         float[] look = Shots.lookAt(cam, anchor);
         return new Shots.Pose(cam, look[0], look[1]);

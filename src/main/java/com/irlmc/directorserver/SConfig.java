@@ -62,8 +62,8 @@ public final class SConfig {
     /** AIM height on the body (used by FOLLOW). */
     public double camAimHeight = 1.4;
     /** Height/distance when the elevated view is blocked (ground-level filmer). */
-    public double camLowHeight = 1.8;
-    public double camLowDistance = 4.0;
+    public double camLowHeight = 1.0;
+    public double camLowDistance = 3.5;
     /** Weave around obstacles instead of only pulling the arm in. */
     public boolean camWeave = true;
     /** Penalty (clearance units) per 35 degrees of weave deviation. */
@@ -166,8 +166,8 @@ public final class SConfig {
             steadyAngleDeg = Double.parseDouble(props.getProperty("steadyAngleDeg", "0.0"));
             steadyLookHeight = Double.parseDouble(props.getProperty("steadyLookHeight", "1.2"));
             camAimHeight = Double.parseDouble(props.getProperty("camAimHeight", "1.4"));
-            camLowHeight = Double.parseDouble(props.getProperty("camLowHeight", "1.8"));
-            camLowDistance = Double.parseDouble(props.getProperty("camLowDistance", "4.0"));
+            camLowHeight = Double.parseDouble(props.getProperty("camLowHeight", "1.0"));
+            camLowDistance = Double.parseDouble(props.getProperty("camLowDistance", "3.5"));
             camWeave = Boolean.parseBoolean(props.getProperty("camWeave", "true"));
             camWeavePenalty = Double.parseDouble(props.getProperty("camWeavePenalty", "0.15"));
             steadyFollow = Double.parseDouble(props.getProperty("steadyFollow", "0.10"));
