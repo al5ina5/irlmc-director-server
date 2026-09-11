@@ -63,6 +63,8 @@ public final class DirectorServer {
         /** Current spring-arm retract scale (1 = fully extended). */
         double armScale = 1.0;
         long lastArmLog = 0L;
+        /** Previous camera position, for swept collision between ticks. */
+        Vec3 lastCam;
     }
 
     private final Random random = new Random();
@@ -265,6 +267,7 @@ public final class DirectorServer {
         s.blendFrom = cut ? null : s.pose;
         s.blendTick = 0;
         s.armScale = 1.0;
+        s.lastCam = null;
         s.current = pick;
         s.currentType = scheduler.pick(cfg, s.currentType);
         s.holdTicks = Math.max(5, cfg.rotationIntervalSec) * 20L;
@@ -322,7 +325,7 @@ public final class DirectorServer {
     private Shots.Pose springArm(ServerPlayer target, Session s, SConfig cfg) {
         if (s.pose == null) return null;
         Vec3 tp = target.position();
-        Vec3 anchor = new Vec3(tp.x, tp.y + cfg.steadyLookHeight, tp.z);
+        Vec3 anchor = new Vec3(tp.x, tp.y + cfg.camAimHeight, tp.z);
         Vec3 desired = s.pose.pos();
         Vec3 delta = desired.subtract(anchor);
         double idealLen = delta.length();
@@ -371,17 +374,66 @@ public final class DirectorServer {
         }
 
         Vec3 cam = anchor.add(dir.scale(idealLen * s.armScale));
+        // Resolve overlaps, apply vertical limits (ground AND ceiling), then
+        // re-resolve in case lowering pushed the camera into something.
+        cam = resolveOverlap(target, anchor, cam, dir);
+        Vec3 preClamp = cam;
+        cam = clampVertical(target, cam, cfg);
+        boolean verticalClamped = Math.abs(cam.y - preClamp.y) > 1.0e-3;
+        cam = resolveOverlap(target, anchor, cam, dir);
+
+        // Swept guard: never cross a block between ticks. The client interpolates
+        // the segment between server positions, so if this segment is clear the
+        // rendered path cannot pass through trees or walls while moving.
+        boolean sweepHit = false;
+        if (s.lastCam != null) {
+            var sweep = target.level().clip(new ClipContext(s.lastCam, cam,
+                    ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, target));
+            if (sweep.getType() == HitResult.Type.BLOCK) {
+                Vec3 step = cam.subtract(s.lastCam);
+                double len = step.length();
+                if (len > 1.0e-4) {
+                    double f = Math.max(0.0,
+                            (s.lastCam.distanceTo(sweep.getLocation()) - cfg.armMargin) / len);
+                    cam = s.lastCam.add(step.scale(f));
+                    sweepHit = true;
+                }
+            }
+        }
+        s.lastCam = cam;
+
+        if ((verticalClamped || sweepHit) && now - s.lastArmLog > 1000) {
+            s.lastArmLog = now;
+            LOG.info("Camera clamp: vertical={} sweep={} camY={}",
+                    verticalClamped, sweepHit, String.format("%.2f", cam.y));
+        }
+
+        float[] look = Shots.lookAt(cam, anchor);
+        return new Shots.Pose(cam, look[0], look[1]);
+    }
+
+    /** Keep the camera within the vertical gap at its position (ground .. ceiling). */
+    private Vec3 clampVertical(ServerPlayer target, Vec3 cam, SConfig cfg) {
         var down = target.level().clip(new ClipContext(cam, cam.subtract(0, 8, 0),
                 ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, target));
         if (down.getType() == HitResult.Type.BLOCK) {
             double gy = down.getLocation().y + cfg.armMargin;
             if (cam.y < gy) cam = new Vec3(cam.x, gy, cam.z);
         }
-        // Final safety: if the camera still landed inside a solid block, walk it
-        // back toward the target until it is clear.
-        cam = resolveOverlap(target, anchor, cam, dir);
-        float[] look = Shots.lookAt(cam, anchor);
-        return new Shots.Pose(cam, look[0], look[1]);
+        var up = target.level().clip(new ClipContext(cam, cam.add(0, cfg.armMargin + 1.0, 0),
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, target));
+        if (up.getType() == HitResult.Type.BLOCK) {
+            double cy = up.getLocation().y - cfg.armMargin;
+            if (cam.y > cy) cam = new Vec3(cam.x, cy, cam.z);
+        }
+        // Lowering for a ceiling can push below the floor; re-apply ground.
+        down = target.level().clip(new ClipContext(cam, cam.subtract(0, 8, 0),
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, target));
+        if (down.getType() == HitResult.Type.BLOCK) {
+            double gy = down.getLocation().y + cfg.armMargin;
+            if (cam.y < gy) cam = new Vec3(cam.x, gy, cam.z);
+        }
+        return cam;
     }
 
     private Vec3 resolveOverlap(ServerPlayer target, Vec3 anchor, Vec3 cam, Vec3 dir) {

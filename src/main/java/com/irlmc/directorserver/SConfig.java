@@ -59,6 +59,15 @@ public final class SConfig {
     public double steadyAngleDeg = 0.0;
     /** Height on the target the camera aims at. */
     public double steadyLookHeight = 1.2;
+    /** AIM height on the body (used by FOLLOW). */
+    public double camAimHeight = 1.4;
+    /** Height/distance when the elevated view is blocked (ground-level filmer). */
+    public double camLowHeight = 1.8;
+    public double camLowDistance = 4.0;
+    /** Weave around obstacles instead of only pulling the arm in. */
+    public boolean camWeave = true;
+    /** Penalty (clearance units) per 35 degrees of weave deviation. */
+    public double camWeavePenalty = 0.15;
     /** Per-tick follow factor (0..1). Lower = lazier, more tolerant of quick moves. */
     public double steadyFollow = 0.10;
 
@@ -156,6 +165,11 @@ public final class SConfig {
             steadyHeight = Double.parseDouble(props.getProperty("steadyHeight", "4.5"));
             steadyAngleDeg = Double.parseDouble(props.getProperty("steadyAngleDeg", "0.0"));
             steadyLookHeight = Double.parseDouble(props.getProperty("steadyLookHeight", "1.2"));
+            camAimHeight = Double.parseDouble(props.getProperty("camAimHeight", "1.4"));
+            camLowHeight = Double.parseDouble(props.getProperty("camLowHeight", "1.8"));
+            camLowDistance = Double.parseDouble(props.getProperty("camLowDistance", "4.0"));
+            camWeave = Boolean.parseBoolean(props.getProperty("camWeave", "true"));
+            camWeavePenalty = Double.parseDouble(props.getProperty("camWeavePenalty", "0.15"));
             steadyFollow = Double.parseDouble(props.getProperty("steadyFollow", "0.10"));
             followMode = props.getProperty("followMode", "velocity").trim();
             followAlign = Double.parseDouble(props.getProperty("followAlign", "0.05"));
@@ -190,6 +204,11 @@ public final class SConfig {
         props.setProperty("steadyHeight", Double.toString(steadyHeight));
         props.setProperty("steadyAngleDeg", Double.toString(steadyAngleDeg));
         props.setProperty("steadyLookHeight", Double.toString(steadyLookHeight));
+        props.setProperty("camAimHeight", Double.toString(camAimHeight));
+        props.setProperty("camLowHeight", Double.toString(camLowHeight));
+        props.setProperty("camLowDistance", Double.toString(camLowDistance));
+        props.setProperty("camWeave", Boolean.toString(camWeave));
+        props.setProperty("camWeavePenalty", Double.toString(camWeavePenalty));
         props.setProperty("steadyFollow", Double.toString(steadyFollow));
         props.setProperty("followMode", followMode);
         props.setProperty("followAlign", Double.toString(followAlign));

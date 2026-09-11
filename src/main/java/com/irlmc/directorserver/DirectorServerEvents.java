@@ -104,6 +104,18 @@ public final class DirectorServerEvents {
                                 .then(Commands.argument("degrees", DoubleArgumentType.doubleArg(0.0, 359.0))
                                         .executes(ctx -> camSet(ctx, "angle",
                                                 DoubleArgumentType.getDouble(ctx, "degrees")))))
+                        .then(Commands.literal("aim")
+                                .then(Commands.argument("blocks", DoubleArgumentType.doubleArg(0.5, 3.0))
+                                        .executes(ctx -> camSet(ctx, "aim",
+                                                DoubleArgumentType.getDouble(ctx, "blocks")))))
+                        .then(Commands.literal("lowheight")
+                                .then(Commands.argument("blocks", DoubleArgumentType.doubleArg(0.5, 5.0))
+                                        .executes(ctx -> camSet(ctx, "lowheight",
+                                                DoubleArgumentType.getDouble(ctx, "blocks")))))
+                        .then(Commands.literal("lowdist")
+                                .then(Commands.argument("blocks", DoubleArgumentType.doubleArg(1.0, 10.0))
+                                        .executes(ctx -> camSet(ctx, "lowdist",
+                                                DoubleArgumentType.getDouble(ctx, "blocks")))))
                         .then(Commands.literal("align")
                                 .then(Commands.argument("factor", DoubleArgumentType.doubleArg(0.005, 1.0))
                                         .executes(ctx -> camSet(ctx, "align",
@@ -217,6 +229,9 @@ public final class DirectorServerEvents {
             case "height" -> c.steadyHeight = value;
             case "angle" -> c.steadyAngleDeg = value;
             case "align" -> c.followAlign = value;
+            case "aim" -> c.camAimHeight = value;
+            case "lowheight" -> c.camLowHeight = value;
+            case "lowdist" -> c.camLowDistance = value;
             default -> { }
         }
         c.save();

@@ -2,6 +2,8 @@ package com.irlmc.directorserver;
 
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 /**
@@ -9,6 +11,9 @@ import net.minecraft.world.phys.Vec3;
  * (MIT) via our Fabric prototype. Pure Vec3/yaw/pitch math — no loader APIs.
  */
 public final class Shots {
+    private static final org.slf4j.Logger LOG =
+            org.slf4j.LoggerFactory.getLogger("irlmc-director-server");
+
     private Shots() {}
 
     public record Pose(Vec3 pos, float yaw, float pitch) {}
@@ -212,6 +217,8 @@ public final class Shots {
         private double dirZ = 1.0;
         private boolean init = false;
         private Vec3 lastPos;
+        private double weaveOffsetDeg = 0.0;
+        private long lastModeLog = 0L;
 
         @Override
         public Pose next(Player target, Pose cur, long tick, SConfig cfg) {
@@ -245,13 +252,80 @@ public final class Shots {
             }
             lastPos = tp;
 
-            Vec3 cam = new Vec3(
-                    tp.x + dirX * cfg.steadyDistance,
-                    tp.y + cfg.steadyHeight,
-                    tp.z + dirZ * cfg.steadyDistance);
-            Vec3 aim = new Vec3(tp.x, tp.y + cfg.steadyLookHeight, tp.z);
+            Vec3 aim = new Vec3(tp.x, tp.y + cfg.camAimHeight, tp.z);
+
+            // Is the elevated "drone" pose viable? In the open it is (openness 1),
+            // so we keep the high/wide view. Under a canopy / in tight woods it is
+            // blocked (openness -> 0), so we drop to a ground-level, person-height
+            // follow — like someone filming on foot instead of a drone.
+            Vec3 highIdeal = camAt(tp, dirX, dirZ, 0.0, cfg.steadyDistance, cfg.steadyHeight);
+            double highClear = clearFraction(target, aim, highIdeal);
+            double headReach = cfg.steadyHeight + 1.0;
+            double headClear = clearFraction(target, aim, aim.add(0, headReach, 0));
+            double openness = Math.min(highClear, headClear);
+
+            double desiredHeight = Mth.lerp(openness, cfg.camLowHeight, cfg.steadyHeight);
+            // Hard rule: never sit above the ceiling (minus margin). This is what
+            // keeps the camera out of low overheads/foliage instead of clipping.
+            double ceilingY = aim.y + headClear * headReach;
+            double maxHeight = (ceilingY - cfg.armMargin) - tp.y;
+            double height = Math.min(desiredHeight, Math.max(0.5, maxHeight));
+            double dist = Mth.lerp(openness, cfg.camLowDistance, cfg.steadyDistance);
+
+            // Weave: try a wide fan of headings and steer toward the clearest gap,
+            // biased to the current heading so it doesn't oscillate. This is what
+            // lets a ground-level camera slip between trunks instead of jamming
+            // into one and collapsing against the player.
+            double applied = weaveOffsetDeg;
+            if (cfg.camWeave) {
+                double[] offs = {0, 25, -25, 50, -50, 75, -75, 100, -100, 125, -125, 180};
+                double bestOff = weaveOffsetDeg;
+                double bestScore = -Double.MAX_VALUE;
+                for (double off : offs) {
+                    double f = clearFraction(target, aim, camAt(tp, dirX, dirZ, off, dist, height));
+                    double score = f - Math.abs(off) / 180.0 * cfg.camWeavePenalty;
+                    score += (1.0 - Math.min(1.0, Math.abs(off - weaveOffsetDeg) / 90.0)) * 0.08;
+                    if (score > bestScore) {
+                        bestScore = score;
+                        bestOff = off;
+                    }
+                }
+                applied = weaveOffsetDeg + Mth.wrapDegrees((float) (bestOff - weaveOffsetDeg)) * 0.2;
+            }
+            weaveOffsetDeg = applied;
+
+            Vec3 cam = camAt(tp, dirX, dirZ, applied, dist, height);
+            if (openness < 0.5 && cfg.camWeave
+                    && System.currentTimeMillis() - lastModeLog > 1000) {
+                lastModeLog = System.currentTimeMillis();
+                LOG.info("Follow ground-mode: openness={} height={} dist={} weave={}",
+                        String.format("%.2f", openness), String.format("%.1f", height),
+                        String.format("%.1f", dist), String.format("%.0f", applied));
+            }
             float[] look = lookAt(cam, aim);
             return new Pose(cam, look[0], look[1]);
+        }
+
+        private static Vec3 camAt(Vec3 tp, double dx, double dz, double offDeg,
+                                  double dist, double height) {
+            if (offDeg == 0.0) {
+                return new Vec3(tp.x + dx * dist, tp.y + height, tp.z + dz * dist);
+            }
+            double a = Math.toRadians(offDeg);
+            double cx = dx * Math.cos(a) - dz * Math.sin(a);
+            double cz = dx * Math.sin(a) + dz * Math.cos(a);
+            return new Vec3(tp.x + cx * dist, tp.y + height, tp.z + cz * dist);
+        }
+
+        private static double clearFraction(Player target, Vec3 from, Vec3 to) {
+            double len = from.distanceTo(to);
+            if (len < 1.0e-4) return 1.0;
+            var hit = target.level().clip(new ClipContext(from, to,
+                    ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, target));
+            if (hit.getType() == HitResult.Type.BLOCK) {
+                return Mth.clamp(from.distanceTo(hit.getLocation()) / len, 0.0, 1.0);
+            }
+            return 1.0;
         }
     }
 
