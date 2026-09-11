@@ -1,5 +1,6 @@
 package com.irlmc.directorserver;
 
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
@@ -72,7 +73,38 @@ public final class DirectorServerEvents {
                                 .suggests((ctx, b) -> SharedSuggestionProvider.suggest(
                                         ctx.getSource().getOnlinePlayerNames(), b))
                                 .executes(DirectorServerEvents::target))
-                        .then(Commands.literal("clear").executes(DirectorServerEvents::targetClear))));
+                        .then(Commands.literal("clear").executes(DirectorServerEvents::targetClear)))
+                .then(Commands.literal("cam")
+                        .executes(DirectorServerEvents::camStatus)
+                        .then(Commands.literal("status").executes(DirectorServerEvents::camStatus))
+                        .then(Commands.literal("mode")
+                                .then(Commands.argument("mode", StringArgumentType.word())
+                                        .suggests((ctx, b) -> SharedSuggestionProvider.suggest(
+                                                new String[]{"steady", "velocity"}, b))
+                                        .executes(ctx -> {
+                                            SConfig c = SConfig.get();
+                                            c.followMode = StringArgumentType.getString(ctx, "mode");
+                                            c.save();
+                                            ctx.getSource().sendSuccess(() -> Component.literal(
+                                                    "camera mode = " + c.followMode), false);
+                                            return 1;
+                                        })))
+                        .then(Commands.literal("distance")
+                                .then(Commands.argument("blocks", DoubleArgumentType.doubleArg(1.0, 20.0))
+                                        .executes(ctx -> camSet(ctx, "distance",
+                                                DoubleArgumentType.getDouble(ctx, "blocks")))))
+                        .then(Commands.literal("height")
+                                .then(Commands.argument("blocks", DoubleArgumentType.doubleArg(-3.0, 25.0))
+                                        .executes(ctx -> camSet(ctx, "height",
+                                                DoubleArgumentType.getDouble(ctx, "blocks")))))
+                        .then(Commands.literal("angle")
+                                .then(Commands.argument("degrees", DoubleArgumentType.doubleArg(0.0, 359.0))
+                                        .executes(ctx -> camSet(ctx, "angle",
+                                                DoubleArgumentType.getDouble(ctx, "degrees")))))
+                        .then(Commands.literal("align")
+                                .then(Commands.argument("factor", DoubleArgumentType.doubleArg(0.005, 1.0))
+                                        .executes(ctx -> camSet(ctx, "align",
+                                                DoubleArgumentType.getDouble(ctx, "factor")))))));
     }
 
     private static boolean permitted(CommandSourceStack src) {
@@ -151,6 +183,33 @@ public final class DirectorServerEvents {
         SConfig.get().targetName = "";
         SConfig.get().save();
         ctx.getSource().sendSuccess(() -> Component.literal("Director back to auto-rotate."), false);
+        return 1;
+    }
+
+    private static int camStatus(CommandContext<CommandSourceStack> ctx) {
+        SConfig c = SConfig.get();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "camera: mode=" + c.followMode
+                + " dist=" + c.steadyDistance
+                + " height=" + c.steadyHeight
+                + " angle=" + c.steadyAngleDeg
+                + " align=" + c.followAlign
+                + " armMin=" + c.armMin
+                + " margin=" + c.armMargin), false);
+        return 1;
+    }
+
+    private static int camSet(CommandContext<CommandSourceStack> ctx, String field, double value) {
+        SConfig c = SConfig.get();
+        switch (field) {
+            case "distance" -> c.steadyDistance = value;
+            case "height" -> c.steadyHeight = value;
+            case "angle" -> c.steadyAngleDeg = value;
+            case "align" -> c.followAlign = value;
+            default -> { }
+        }
+        c.save();
+        ctx.getSource().sendSuccess(() -> Component.literal("camera " + field + " = " + value), false);
         return 1;
     }
 }

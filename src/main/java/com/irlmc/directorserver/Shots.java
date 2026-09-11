@@ -65,6 +65,7 @@ public final class Shots {
     public static Shot create(ShotType type, long durationTicks, double orbitStartDeg) {
         long d = Math.max(40, durationTicks);
         return switch (type) {
+            case FOLLOW -> new Follow();
             case STEADY -> new Steady();
             case ORBIT -> new Orbit(orbitStartDeg);
             case FLYBY -> new Flyby(d);
@@ -193,10 +194,69 @@ public final class Shots {
     }
 
     /**
-     * Stable, world-locked follow camera: a fixed compass angle, elevation and
-     * distance from the target. It does NOT follow the target's head/view at all
-     * — only its position, and even that lazily via {@code steadyFollow}. This is
-     * the calm "documentary / IRL stream" angle: no spinning, no chasing the view.
+     * Follow camera with a heavily-damped heading.
+     *
+     * The camera sits at a fixed distance/height, in a horizontal direction
+     * {@code camDir} that:
+     *   - "steady" mode: stays locked to a fixed compass angle, or
+     *   - "velocity" mode: slowly settles behind the direction of travel.
+     *
+     * It never looks at or tracks the target's head/view, so turning the view
+     * does not move the camera. The slow {@code followAlign} makes it tolerant of
+     * quick direction changes while still leading the target around corners.
+     *
+     * Collision (spring arm) is applied by the caller.
+     */
+    static final class Follow implements Shot {
+        private double dirX = 0.0;
+        private double dirZ = 1.0;
+        private boolean init = false;
+        private Vec3 lastPos;
+
+        @Override
+        public Pose next(Player target, Pose cur, long tick, SConfig cfg) {
+            Vec3 tp = target.position();
+
+            if (!init) {
+                double r = Math.toRadians(cfg.steadyAngleDeg);
+                dirX = -Math.sin(r);
+                dirZ = Math.cos(r);
+                init = true;
+            }
+
+            boolean velocity = "velocity".equalsIgnoreCase(cfg.followMode);
+            if (velocity && lastPos != null) {
+                double vx = tp.x - lastPos.x;
+                double vz = tp.z - lastPos.z;
+                double sp = Math.hypot(vx, vz);
+                if (sp > cfg.followDeadzone) {
+                    // desired camera direction = opposite the movement direction
+                    double dx = -vx / sp;
+                    double dz = -vz / sp;
+                    double k = Mth.clamp(cfg.followAlign, 0.0, 1.0);
+                    double nx = dirX + (dx - dirX) * k;
+                    double nz = dirZ + (dz - dirZ) * k;
+                    double n = Math.hypot(nx, nz);
+                    if (n > 1.0e-6) {
+                        dirX = nx / n;
+                        dirZ = nz / n;
+                    }
+                }
+            }
+            lastPos = tp;
+
+            Vec3 cam = new Vec3(
+                    tp.x + dirX * cfg.steadyDistance,
+                    tp.y + cfg.steadyHeight,
+                    tp.z + dirZ * cfg.steadyDistance);
+            Vec3 aim = new Vec3(tp.x, tp.y + cfg.steadyLookHeight, tp.z);
+            float[] look = lookAt(cam, aim);
+            return new Pose(cam, look[0], look[1]);
+        }
+    }
+
+    /**
+     * Fixed world-locked follow camera (no heading change at all).
      */
     static final class Steady implements Shot {
         @Override

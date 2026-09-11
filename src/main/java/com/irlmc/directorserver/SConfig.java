@@ -38,7 +38,15 @@ public final class SConfig {
     public int smoothTicks = 60;
     public int permissionLevel = 2;
     /** Default: one stable, world-locked follow angle — best for IRL/stream use. */
-    public List<ShotType> pool = new ArrayList<>(List.of(ShotType.STEADY));
+    public List<ShotType> pool = new ArrayList<>(List.of(ShotType.FOLLOW));
+
+    // ---- FOLLOW / STEADY shot: a fixed, elevated follow camera ----
+    /** "velocity" slowly settles behind movement direction; "steady" keeps a fixed compass angle. */
+    public String followMode = "velocity";
+    /** Per-tick alignment toward the movement direction (lower = lazier). */
+    public double followAlign = 0.05;
+    /** Minimum horizontal speed (blocks/tick) before velocity alignment kicks in. */
+    public double followDeadzone = 0.04;
 
     // ---- STEADY shot: a fixed, elevated, world-locked follow camera ----
     /** Horizontal distance from the target. */
@@ -52,6 +60,18 @@ public final class SConfig {
     /** Per-tick follow factor (0..1). Lower = lazier, more tolerant of quick moves. */
     public double steadyFollow = 0.10;
 
+    // ---- spring-arm collision ----
+    /** Minimum distance the arm may retract to (blocks). */
+    public double armMin = 2.0;
+    /** Near-plane clearance kept from any obstruction (blocks). */
+    public double armMargin = 0.45;
+    /** Camera radius approximated by the sphere cast (blocks). */
+    public double armRadius = 0.5;
+    /** Per-tick retract factor when a wall intrudes (higher = snaps in faster). */
+    public double armRetract = 0.55;
+    /** Per-tick extend factor when clear (lower = eases back out slower). */
+    public double armExtend = 0.05;
+
     /** Consecutive shots that may not be reused (keeps cuts varied). */
     public int noRepeatWindow = 2;
     /** Per-shot selection weight; 0 disables a type without removing it. */
@@ -59,6 +79,7 @@ public final class SConfig {
 
     public SConfig() {
         // Curated defaults: favour the shots that read well on a third-person feed.
+        shotWeights.put(ShotType.FOLLOW, 1.0);
         shotWeights.put(ShotType.STEADY, 1.0);
         shotWeights.put(ShotType.ORBIT, 2.0);
         shotWeights.put(ShotType.CRANE, 2.0);
@@ -133,6 +154,14 @@ public final class SConfig {
             steadyAngleDeg = Double.parseDouble(props.getProperty("steadyAngleDeg", "0.0"));
             steadyLookHeight = Double.parseDouble(props.getProperty("steadyLookHeight", "1.2"));
             steadyFollow = Double.parseDouble(props.getProperty("steadyFollow", "0.10"));
+            followMode = props.getProperty("followMode", "velocity").trim();
+            followAlign = Double.parseDouble(props.getProperty("followAlign", "0.05"));
+            followDeadzone = Double.parseDouble(props.getProperty("followDeadzone", "0.04"));
+            armMin = Double.parseDouble(props.getProperty("armMin", "2.0"));
+            armMargin = Double.parseDouble(props.getProperty("armMargin", "0.45"));
+            armRadius = Double.parseDouble(props.getProperty("armRadius", "0.5"));
+            armRetract = Double.parseDouble(props.getProperty("armRetract", "0.55"));
+            armExtend = Double.parseDouble(props.getProperty("armExtend", "0.05"));
             parseWeights(props.getProperty("weights", weightsString()));
         } catch (Exception e) {
             LOG.warn("Failed to load director server config", e);
@@ -158,6 +187,14 @@ public final class SConfig {
         props.setProperty("steadyAngleDeg", Double.toString(steadyAngleDeg));
         props.setProperty("steadyLookHeight", Double.toString(steadyLookHeight));
         props.setProperty("steadyFollow", Double.toString(steadyFollow));
+        props.setProperty("followMode", followMode);
+        props.setProperty("followAlign", Double.toString(followAlign));
+        props.setProperty("followDeadzone", Double.toString(followDeadzone));
+        props.setProperty("armMin", Double.toString(armMin));
+        props.setProperty("armMargin", Double.toString(armMargin));
+        props.setProperty("armRadius", Double.toString(armRadius));
+        props.setProperty("armRetract", Double.toString(armRetract));
+        props.setProperty("armExtend", Double.toString(armExtend));
         props.setProperty("weights", weightsString());
         try {
             Files.createDirectories(path().getParent());

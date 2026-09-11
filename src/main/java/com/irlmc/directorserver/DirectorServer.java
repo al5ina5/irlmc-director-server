@@ -18,6 +18,7 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.Identifier;
+import net.minecraft.util.Mth;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -59,6 +60,9 @@ public final class DirectorServer {
         long ticksSinceSwitch;
         long shotTick;
         long holdTicks;
+        /** Current spring-arm retract scale (1 = fully extended). */
+        double armScale = 1.0;
+        long lastArmLog = 0L;
     }
 
     private final Random random = new Random();
@@ -230,10 +234,11 @@ public final class DirectorServer {
                     (float) (s.blendFrom.pitch() + (dest.pitch() - s.blendFrom.pitch()) * t));
             if (s.blendTick >= cfg.smoothTicks) s.blendFrom = null;
         } else {
-            s.pose = unstick(server, cam, target, dest);
+            s.pose = dest;
         }
-        // Collision-safe every frame (cheap raycast).
-        s.pose = unstick(server, cam, target, s.pose);
+        // Spring-arm collision: keep the camera clear of geometry and in line of
+        // sight, retract fast / extend slow so it never pops.
+        s.pose = springArm(target, s, cfg);
 
         ServerLevel targetLevel = target.level() instanceof ServerLevel sl ? sl : server.overworld();
         cam.setDeltaMovement(Vec3.ZERO);
@@ -253,6 +258,7 @@ public final class DirectorServer {
     private void beginShot(Session s, DirectorTarget pick, ServerPlayer target, SConfig cfg) {
         s.blendFrom = s.pose;
         s.blendTick = 0;
+        s.armScale = 1.0;
         s.current = pick;
         s.currentType = scheduler.pick(cfg, s.currentType);
         s.holdTicks = Math.max(5, cfg.rotationIntervalSec) * 20L;
@@ -300,25 +306,66 @@ public final class DirectorServer {
         return null;
     }
 
-    /** Pull the camera out of solid blocks (ray from target eye to desired pos). */
-    private Shots.Pose unstick(MinecraftServer server, ServerPlayer cam, ServerPlayer target, Shots.Pose pose) {
-        if (pose == null) return null;
+    /**
+     * Spring-arm collision. Casts a small sphere (5 rays) from the target's
+     * aim point to the ideal camera position, keeps the camera clear of any
+     * obstruction by a margin, and hammers in fast / eases out slow so it never
+     * pops. Because the center ray ends at the camera, the target stays in line
+     * of sight. A downward ray keeps the camera above the ground.
+     */
+    private Shots.Pose springArm(ServerPlayer target, Session s, SConfig cfg) {
+        if (s.pose == null) return null;
         Vec3 tp = target.position();
-        Vec3 anchor = new Vec3(tp.x, tp.y + 1.5, tp.z);
-        var hit = target.level().clip(new ClipContext(anchor, pose.pos(),
-                ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, target));
-        if (hit.getType() == HitResult.Type.BLOCK) {
-            Vec3 h = hit.getLocation();
-            Vec3 dir = pose.pos().subtract(h);
-            Vec3 fixed = dir.lengthSqr() > 1e-6
-                    ? h.add(dir.normalize().scale(-0.3))
-                    : h.add(0, 0.5, 0);
-            // Never pull closer than 1 block to the anchor.
-            if (fixed.distanceTo(anchor) < 1.0) fixed = anchor.add(0, 0.5, 0);
-            float[] look = Shots.lookAt(fixed, anchor);
-            return new Shots.Pose(fixed, look[0], look[1]);
+        Vec3 anchor = new Vec3(tp.x, tp.y + cfg.steadyLookHeight, tp.z);
+        Vec3 desired = s.pose.pos();
+        Vec3 delta = desired.subtract(anchor);
+        double idealLen = delta.length();
+        if (idealLen < 1.0e-4) return s.pose;
+        Vec3 dir = delta.normalize();
+
+        Vec3 right = dir.cross(new Vec3(0, 1, 0));
+        if (right.lengthSqr() < 1.0e-6) right = new Vec3(1, 0, 0);
+        right = right.normalize();
+        Vec3 upv = right.cross(dir).normalize();
+
+        double r = cfg.armRadius;
+        Vec3[] offs = {Vec3.ZERO, right.scale(r), right.scale(-r), upv.scale(r), upv.scale(-r)};
+        double hitFrac = 1.0;
+        for (Vec3 off : offs) {
+            var hit = target.level().clip(new ClipContext(anchor.add(off), desired.add(off),
+                    ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, target));
+            if (hit.getType() == HitResult.Type.BLOCK) {
+                double f = anchor.distanceTo(hit.getLocation()) / idealLen;
+                if (f < hitFrac) hitFrac = f;
+            }
         }
-        return pose;
+
+        double minScale = Mth.clamp(cfg.armMin / idealLen, 0.0, 1.0);
+        double maxScale = Mth.clamp(hitFrac - cfg.armMargin / idealLen, minScale, 1.0);
+        if (maxScale < s.armScale) {
+            s.armScale += (maxScale - s.armScale) * Mth.clamp(cfg.armRetract, 0.0, 1.0);
+        } else {
+            s.armScale += (maxScale - s.armScale) * Mth.clamp(cfg.armExtend, 0.0, 1.0);
+        }
+        s.armScale = Mth.clamp(s.armScale, minScale, 1.0);
+
+        long now = System.currentTimeMillis();
+        if (s.armScale < 0.85 && now - s.lastArmLog > 1000) {
+            s.lastArmLog = now;
+            LOG.info("SpringArm retract: scale={} (hitFrac={}) target={}",
+                    String.format("%.2f", s.armScale), String.format("%.2f", hitFrac),
+                    target.getName().getString());
+        }
+
+        Vec3 cam = anchor.add(dir.scale(idealLen * s.armScale));
+        var down = target.level().clip(new ClipContext(cam, cam.subtract(0, 8, 0),
+                ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, target));
+        if (down.getType() == HitResult.Type.BLOCK) {
+            double gy = down.getLocation().y + cfg.armMargin;
+            if (cam.y < gy) cam = new Vec3(cam.x, gy, cam.z);
+        }
+        float[] look = Shots.lookAt(cam, anchor);
+        return new Shots.Pose(cam, look[0], look[1]);
     }
 
     // ---- persistence (survive server restarts) ----
