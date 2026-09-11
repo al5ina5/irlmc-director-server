@@ -6,7 +6,9 @@ import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import net.neoforged.fml.loading.FMLPaths;
 import org.slf4j.Logger;
@@ -39,6 +41,56 @@ public final class SConfig {
             ShotType.ORBIT, ShotType.FLYBY, ShotType.CRANE,
             ShotType.DYNAMIC_BEHIND, ShotType.BEHIND, ShotType.MOVE));
 
+    /** Consecutive shots that may not be reused (keeps cuts varied). */
+    public int noRepeatWindow = 2;
+    /** Per-shot selection weight; 0 disables a type without removing it. */
+    public final Map<ShotType, Double> shotWeights = new EnumMap<>(ShotType.class);
+
+    public SConfig() {
+        // Curated defaults: favour the shots that read well on a third-person feed.
+        shotWeights.put(ShotType.ORBIT, 2.0);
+        shotWeights.put(ShotType.CRANE, 2.0);
+        shotWeights.put(ShotType.DYNAMIC_BEHIND, 3.0);
+        shotWeights.put(ShotType.DYNAMIC_FRONT, 1.0);
+        shotWeights.put(ShotType.FLYBY, 1.0);
+        shotWeights.put(ShotType.BEHIND, 1.0);
+        shotWeights.put(ShotType.MOVE, 1.0);
+        shotWeights.put(ShotType.FRONT, 0.5);
+        shotWeights.put(ShotType.FIX, 0.5);
+        shotWeights.put(ShotType.DYNAMIC_POV, 0.0);
+    }
+
+    public double weightOf(ShotType type) {
+        Double w = shotWeights.get(type);
+        return w == null ? 1.0 : w;
+    }
+
+    private String weightsString() {
+        StringBuilder sb = new StringBuilder();
+        for (ShotType t : ShotType.values()) {
+            if (shotWeights.containsKey(t)) {
+                if (sb.length() > 0) sb.append(',');
+                sb.append(t.name()).append(':').append(shotWeights.get(t));
+            }
+        }
+        return sb.toString();
+    }
+
+    private void parseWeights(String value) {
+        shotWeights.clear();
+        if (value == null || value.isBlank()) return;
+        for (String part : value.split(",")) {
+            String[] kv = part.split(":", 2);
+            if (kv.length != 2) continue;
+            try {
+                shotWeights.put(ShotType.valueOf(kv[0].trim().toUpperCase()),
+                        Double.parseDouble(kv[1].trim()));
+            } catch (Exception ignored) {
+                // Unknown type or bad number: keep defaults for the rest.
+            }
+        }
+    }
+
     private Path path() {
         return FMLPaths.CONFIGDIR.get().resolve("irlmc-director-server.properties");
     }
@@ -63,6 +115,8 @@ public final class SConfig {
             followHeight = Double.parseDouble(props.getProperty("followHeight", "1.0"));
             dynamicSmoothness = Double.parseDouble(props.getProperty("smoothness", "0.08"));
             permissionLevel = Math.max(0, Math.min(4, Integer.parseInt(props.getProperty("permissionLevel", "2"))));
+            noRepeatWindow = Math.max(0, Integer.parseInt(props.getProperty("noRepeatWindow", "2")));
+            parseWeights(props.getProperty("weights", weightsString()));
         } catch (Exception e) {
             LOG.warn("Failed to load director server config", e);
         }
@@ -81,6 +135,8 @@ public final class SConfig {
         props.setProperty("followHeight", Double.toString(followHeight));
         props.setProperty("smoothness", Double.toString(dynamicSmoothness));
         props.setProperty("permissionLevel", Integer.toString(permissionLevel));
+        props.setProperty("noRepeatWindow", Integer.toString(noRepeatWindow));
+        props.setProperty("weights", weightsString());
         try {
             Files.createDirectories(path().getParent());
             try (OutputStream out = Files.newOutputStream(path())) {

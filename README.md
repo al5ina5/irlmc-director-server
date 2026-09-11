@@ -105,6 +105,8 @@ followDistance=4.0
 followHeight=1.0
 smoothness=0.08
 permissionLevel=2
+noRepeatWindow=2            # don't reuse any of the last N shot types
+weights=ORBIT:2.0,CRANE:2.0,DYNAMIC_BEHIND:3.0,FLYBY:1.0,...  # 0 disables
 ```
 
 Sessions are stored in `config/irlmc-director-server-sessions.properties` so a
@@ -112,18 +114,25 @@ camera caught mid-session is restored after a restart.
 
 ## Known limitations / roadmap
 
-- The shot pool is currently chosen with uniform randomness; there is no
-  curation, no-repeat scheduling, or context awareness yet.
-- The `MOVE` dolly drift is unbounded over long holds.
-- FLYBY/CRANE are authored for ~30s arcs but are cut at `intervalSec`.
-- A held session on re-login currently restores the player and skips the
-  auto-camera start, which can leave the camera as a survival player.
-- Collision handling is a single ray; the camera can still clip ceilings or
+- ~~Uniformly random shot selection~~ **fixed in 0.3.0**: a weighted, no-repeat
+  scheduler now drives shot choice (`weights`, `noRepeatWindow`).
+- ~~`MOVE` dolly drifts unbounded over long holds~~ **fixed in 0.3.0**: it is a
+  bounded side-arc.
+- ~~FLYBY/CRANE always showed the first third of a 30s loop~~ **fixed in
+  0.3.0**: their arc length is derived from the actual hold time.
+- ~~A held session on re-login restored the camera into survival and could kill
+  it~~ **fixed in 0.3.0**: a camera account now always re-enters spectator and
+  restarts directing, and is kept invulnerable.
+- Collision handling is still a single ray; the camera can clip ceilings or
   film the target through a wall.
+- The camera account is a vanilla player moved by 20 Hz teleports, so motion is
+  quantised to the server tick. Smoothing this requires a small client-side
+  interpolator on the camera client (the client already lerps the camera
+  position between `xo..x`, but `absMoveTo` zeroes that on each teleport).
 
-Planned work: a weighted, no-repeat shot scheduler; line-of-sight and proper
-sphere-cast collision; rule-of-thirds framing and target-velocity look-ahead;
-a small "director brain" that adapts shots to player state; per-shot config.
+Planned work: line-of-sight and sphere-cast collision; rule-of-thirds framing
+and target-velocity look-ahead; player-state-aware shot selection; per-shot
+hold durations; a client-side camera interpolator for the headless rig.
 
 ## License
 

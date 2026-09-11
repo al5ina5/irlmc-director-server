@@ -37,18 +37,21 @@ public final class DirectorServerEvents {
     public static void onPlayerLogin(PlayerEvent.PlayerLoggedInEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer pl)) return;
         var server = ServerLifecycleHooks.getCurrentServer();
+        SConfig cfg = SConfig.get();
+        boolean isCamera = cfg.autoCamera && !cfg.cameraAccount.isEmpty()
+                && pl.getName().getString().equalsIgnoreCase(cfg.cameraAccount);
+        if (isCamera) {
+            // A headless camera account is never "restored" into survival — that
+            // is how it used to respawn and die. Just make it the camera again.
+            DirectorServer.get().startCamera(server, pl);
+            return;
+        }
         if (DirectorServer.get().isDirecting(pl.getUUID())) {
             // Logged out mid-direct: restore where they were.
             DirectorServer.get().stop(server, pl.getUUID(), true);
             return;
         }
         DirectorServer.get().restoreOne(server, pl.getUUID());
-        // Headless camera account: start directing automatically (no /director needed).
-        SConfig cfg = SConfig.get();
-        if (cfg.autoCamera && !cfg.cameraAccount.isEmpty()
-                && pl.getName().getString().equalsIgnoreCase(cfg.cameraAccount)) {
-            DirectorServer.get().start(server, pl);
-        }
     }
 
     @SubscribeEvent

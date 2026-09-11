@@ -52,11 +52,22 @@ public final class Shots {
         return new Vec3(-Math.cos(r), 0, -Math.sin(r));
     }
 
-    public static Shot create(ShotType type) {
+    /**
+     * Build a shot.
+     *
+     * @param durationTicks how long the shot will actually be held, so ping-pong
+     *                      shots (flyby/crane) complete exactly one arc instead
+     *                      of always showing the first third of a fixed 30s loop.
+     * @param orbitStartDeg orbit angle to begin at (usually the current camera
+     *                      bearing) so the camera does not swing to a fixed
+     *                      eastward start on every orbit.
+     */
+    public static Shot create(ShotType type, long durationTicks, double orbitStartDeg) {
+        long d = Math.max(40, durationTicks);
         return switch (type) {
-            case ORBIT -> new Orbit();
-            case FLYBY -> new Flyby(600);
-            case CRANE -> new Crane(600);
+            case ORBIT -> new Orbit(orbitStartDeg);
+            case FLYBY -> new Flyby(d);
+            case CRANE -> new Crane(d);
             case DYNAMIC_BEHIND, DYNAMIC_FRONT, DYNAMIC_POV -> new Dynamic(type);
             case FRONT -> new Static(ShotType.FRONT);
             case BEHIND -> new Static(ShotType.BEHIND);
@@ -67,7 +78,11 @@ public final class Shots {
 
     /** Circles the target at fixed radius/height. */
     static final class Orbit implements Shot {
-        private double angle = 0;
+        private double angle;
+
+        Orbit(double startDeg) {
+            this.angle = startDeg;
+        }
 
         @Override
         public Pose next(Player target, Pose cur, long tick, SConfig cfg) {
@@ -157,15 +172,20 @@ public final class Shots {
         }
     }
 
-    /** Slow dolly from a behind-target start. */
+    /** Slow, bounded side-arc behind the target (no unbounded drift). */
     static final class Move implements Shot {
+        private static final double SPAN_DEG = 55.0;
+        private static final double SWEEP_TICKS = 240.0; // ~12s ease across the arc
+
         @Override
         public Pose next(Player target, Pose cur, long tick, SConfig cfg) {
             Vec3 tp = target.position();
             float yaw = target.getYRot();
-            Vec3 start = tp.subtract(forward(yaw).scale(cfg.followDistance)).add(0, cfg.followHeight, 0);
-            Vec3 drift = right(yaw).scale(-1).add(forward(yaw).scale(-0.1)).normalize().scale(0.02 * tick);
-            Vec3 cam = start.add(drift);
+            double t = smoothstep(Math.min(tick, (long) SWEEP_TICKS) / SWEEP_TICKS);
+            double angle = yaw + SPAN_DEG * (t * 2.0 - 1.0);
+            double radius = cfg.followDistance + 1.0;
+            Vec3 cam = tp.subtract(forward((float) angle).scale(radius))
+                    .add(0, cfg.followHeight + 0.5, 0);
             float[] look = lookAt(cam, new Vec3(tp.x, tp.y + 1.5, tp.z));
             return new Pose(cam, look[0], look[1]);
         }

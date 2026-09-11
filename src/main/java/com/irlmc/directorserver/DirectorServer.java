@@ -58,9 +58,11 @@ public final class DirectorServer {
         int blendTick;
         long ticksSinceSwitch;
         long shotTick;
+        long holdTicks;
     }
 
     private final Random random = new Random();
+    private final ShotScheduler scheduler = new ShotScheduler(random);
     private final Map<UUID, Session> sessions = new HashMap<>();
     private int roundRobin = -1;
     private boolean configLoaded = false;
@@ -93,9 +95,26 @@ public final class DirectorServer {
             sessions.put(cam.getUUID(), s);
         }
         cam.setGameMode(GameType.SPECTATOR);
+        cam.setInvulnerable(true);
+        cam.setDeltaMovement(Vec3.ZERO);
+        cam.fallDistance = 0f;
         saveSessions(server);
         cam.sendSystemMessage(Component.literal("Director ON — you are the camera (hands off WASD). /director off to stop."));
         LOG.info("Director started for {}", cam.getName().getString());
+    }
+
+    /**
+     * Make the dedicated camera account the camera again, ignoring any stale
+     * session left over from a crash or an abrupt client kill. A headless camera
+     * must never be "restored" into survival (which is how it used to die).
+     */
+    public void startCamera(MinecraftServer server, ServerPlayer cam) {
+        synchronized (sessions) {
+            sessions.remove(cam.getUUID());
+        }
+        start(server, cam);
+        cam.setInvulnerable(true);
+        cam.setDeltaMovement(Vec3.ZERO);
     }
 
     public void stop(MinecraftServer server, UUID uuid, boolean restore) {
@@ -163,13 +182,19 @@ public final class DirectorServer {
             return;
         }
         DirectorTarget locked = lockedTarget(server, cfg);
-        long interval = Math.max(5, cfg.rotationIntervalSec) * 20L;
+        long interval = Math.max(40L,
+                s.holdTicks > 0 ? s.holdTicks : Math.max(5, cfg.rotationIntervalSec) * 20L);
         if (locked != null) {
-            if (s.current == null || !locked.uuid().equals(s.current.uuid())) {
-                beginShot(s, locked, cfg);
+            ServerPlayer lt = locked.resolve(server);
+            boolean newTarget = s.current == null || !locked.uuid().equals(s.current.uuid());
+            if (lt != null && (newTarget || s.ticksSinceSwitch >= interval)) {
+                // Same player, but time to roll a new angle. Keep rotating even
+                // when locked (locking pins the *player*, not the shot).
+                beginShot(s, locked, lt, cfg);
+                s.ticksSinceSwitch = 0;
+                s.shotTick = 0;
                 announce(cam, s);
             }
-            s.ticksSinceSwitch = 0;
         } else {
             boolean stale = s.current == null || !s.current.isValid(server);
             if (stale || s.ticksSinceSwitch >= interval) {
@@ -185,7 +210,8 @@ public final class DirectorServer {
                         }
                     }
                 }
-                beginShot(s, pick, cfg);
+                ServerPlayer pt = pick.resolve(server);
+                if (pt != null) beginShot(s, pick, pt, cfg);
                 s.ticksSinceSwitch = 0;
                 s.shotTick = 0;
                 announce(cam, s);
@@ -213,15 +239,32 @@ public final class DirectorServer {
         cam.setDeltaMovement(Vec3.ZERO);
         cam.teleportTo(targetLevel, s.pose.pos().x, s.pose.pos().y, s.pose.pos().z,
                 EnumSet.noneOf(Relative.class), s.pose.yaw(), s.pose.pitch(), false);
+        // A headless camera must never fall out of spectator or take damage:
+        // a crash/restart can otherwise "restore" it into survival and kill it.
+        if (cam.gameMode.getGameModeForPlayer() != GameType.SPECTATOR) {
+            cam.setGameMode(GameType.SPECTATOR);
+        }
+        if (!cam.isInvulnerable()) {
+            cam.setInvulnerable(true);
+        }
+        cam.fallDistance = 0f;
     }
 
-    private void beginShot(Session s, DirectorTarget pick, SConfig cfg) {
+    private void beginShot(Session s, DirectorTarget pick, ServerPlayer target, SConfig cfg) {
         s.blendFrom = s.pose;
         s.blendTick = 0;
         s.current = pick;
-        s.currentType = cfg.pool.isEmpty() ? ShotType.ORBIT
-                : cfg.pool.get(random.nextInt(cfg.pool.size()));
-        s.shot = Shots.create(s.currentType);
+        s.currentType = scheduler.pick(cfg, s.currentType);
+        s.holdTicks = Math.max(5, cfg.rotationIntervalSec) * 20L;
+        // Start an orbit from the camera's current bearing around the target so
+        // it glides in instead of swinging to a fixed eastward start.
+        double orbitStart = 0.0;
+        if (s.pose != null && target != null) {
+            Vec3 tp = target.position();
+            orbitStart = Math.toDegrees(Math.atan2(
+                    s.pose.pos().z - tp.z, s.pose.pos().x - tp.x));
+        }
+        s.shot = Shots.create(s.currentType, s.holdTicks, orbitStart);
     }
 
     private void announce(ServerPlayer cam, Session s) {
