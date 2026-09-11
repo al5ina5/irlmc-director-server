@@ -286,13 +286,16 @@ public final class Shots {
                 for (double off : offs) {
                     double f = clearFraction(target, aim, camAt(tp, dirX, dirZ, off, dist, height));
                     double score = f - Math.abs(off) / 180.0 * cfg.camWeavePenalty;
-                    score += (1.0 - Math.min(1.0, Math.abs(off - weaveOffsetDeg) / 90.0)) * 0.08;
+                    // Strong bias to the current heading so it doesn't flip-flop
+                    // between equal gaps (which swings the camera sideways).
+                    score += (1.0 - Math.min(1.0, Math.abs(off - weaveOffsetDeg) / 90.0)) * 0.25;
                     if (score > bestScore) {
                         bestScore = score;
                         bestOff = off;
                     }
                 }
-                applied = weaveOffsetDeg + Mth.wrapDegrees((float) (bestOff - weaveOffsetDeg)) * 0.2;
+                // Ease toward the chosen heading slowly (no lateral snaps).
+                applied = weaveOffsetDeg + Mth.wrapDegrees((float) (bestOff - weaveOffsetDeg)) * 0.08;
             }
             weaveOffsetDeg = applied;
 

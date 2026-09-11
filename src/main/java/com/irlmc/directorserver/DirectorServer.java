@@ -357,12 +357,12 @@ public final class DirectorServer {
         // (The old code clamped to armMin, which pushed the camera *through* close
         // walls — that was the "goes through walls" bug.)
         double maxScale = Mth.clamp(hitFrac - cfg.armMargin / idealLen, 0.0, 1.0);
-        if (maxScale < s.armScale) {
-            s.armScale = maxScale; // retract instantly: never clip
-        } else {
-            s.armScale += (maxScale - s.armScale) * Mth.clamp(cfg.armExtend, 0.0, 1.0);
-        }
-        s.armScale = Math.min(Mth.clamp(s.armScale, 0.0, 1.0), maxScale);
+        // Ease in BOTH directions (retract faster than extend). The old instant
+        // retract + slow extend made the camera creep out then snap back, which
+        // read as "freeze then teleport".
+        double factor = maxScale < s.armScale ? cfg.armRetract : cfg.armExtend;
+        s.armScale += (maxScale - s.armScale) * Mth.clamp(factor, 0.0, 1.0);
+        s.armScale = Mth.clamp(s.armScale, 0.0, 1.0);
 
         long now = System.currentTimeMillis();
         if (s.armScale < 0.85 && now - s.lastArmLog > 1000) {
