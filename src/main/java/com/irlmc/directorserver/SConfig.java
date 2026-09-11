@@ -37,9 +37,20 @@ public final class SConfig {
     public double dynamicSmoothness = 0.08;
     public int smoothTicks = 60;
     public int permissionLevel = 2;
-    public List<ShotType> pool = new ArrayList<>(List.of(
-            ShotType.ORBIT, ShotType.FLYBY, ShotType.CRANE,
-            ShotType.DYNAMIC_BEHIND, ShotType.BEHIND, ShotType.MOVE));
+    /** Default: one stable, world-locked follow angle — best for IRL/stream use. */
+    public List<ShotType> pool = new ArrayList<>(List.of(ShotType.STEADY));
+
+    // ---- STEADY shot: a fixed, elevated, world-locked follow camera ----
+    /** Horizontal distance from the target. */
+    public double steadyDistance = 7.0;
+    /** Height above the target's feet. */
+    public double steadyHeight = 4.5;
+    /** Compass direction the camera sits toward (MC yaw: 0 = south of the target). */
+    public double steadyAngleDeg = 0.0;
+    /** Height on the target the camera aims at. */
+    public double steadyLookHeight = 1.2;
+    /** Per-tick follow factor (0..1). Lower = lazier, more tolerant of quick moves. */
+    public double steadyFollow = 0.10;
 
     /** Consecutive shots that may not be reused (keeps cuts varied). */
     public int noRepeatWindow = 2;
@@ -48,6 +59,7 @@ public final class SConfig {
 
     public SConfig() {
         // Curated defaults: favour the shots that read well on a third-person feed.
+        shotWeights.put(ShotType.STEADY, 1.0);
         shotWeights.put(ShotType.ORBIT, 2.0);
         shotWeights.put(ShotType.CRANE, 2.0);
         shotWeights.put(ShotType.DYNAMIC_BEHIND, 3.0);
@@ -116,6 +128,11 @@ public final class SConfig {
             dynamicSmoothness = Double.parseDouble(props.getProperty("smoothness", "0.08"));
             permissionLevel = Math.max(0, Math.min(4, Integer.parseInt(props.getProperty("permissionLevel", "2"))));
             noRepeatWindow = Math.max(0, Integer.parseInt(props.getProperty("noRepeatWindow", "2")));
+            steadyDistance = Double.parseDouble(props.getProperty("steadyDistance", "7.0"));
+            steadyHeight = Double.parseDouble(props.getProperty("steadyHeight", "4.5"));
+            steadyAngleDeg = Double.parseDouble(props.getProperty("steadyAngleDeg", "0.0"));
+            steadyLookHeight = Double.parseDouble(props.getProperty("steadyLookHeight", "1.2"));
+            steadyFollow = Double.parseDouble(props.getProperty("steadyFollow", "0.10"));
             parseWeights(props.getProperty("weights", weightsString()));
         } catch (Exception e) {
             LOG.warn("Failed to load director server config", e);
@@ -136,6 +153,11 @@ public final class SConfig {
         props.setProperty("smoothness", Double.toString(dynamicSmoothness));
         props.setProperty("permissionLevel", Integer.toString(permissionLevel));
         props.setProperty("noRepeatWindow", Integer.toString(noRepeatWindow));
+        props.setProperty("steadyDistance", Double.toString(steadyDistance));
+        props.setProperty("steadyHeight", Double.toString(steadyHeight));
+        props.setProperty("steadyAngleDeg", Double.toString(steadyAngleDeg));
+        props.setProperty("steadyLookHeight", Double.toString(steadyLookHeight));
+        props.setProperty("steadyFollow", Double.toString(steadyFollow));
         props.setProperty("weights", weightsString());
         try {
             Files.createDirectories(path().getParent());

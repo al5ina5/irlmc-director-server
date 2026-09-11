@@ -1,6 +1,7 @@
 package com.irlmc.directorserver;
 
 public enum ShotType {
+    STEADY,
     ORBIT,
     FLYBY,
     CRANE,

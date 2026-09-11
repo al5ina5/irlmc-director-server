@@ -65,6 +65,7 @@ public final class Shots {
     public static Shot create(ShotType type, long durationTicks, double orbitStartDeg) {
         long d = Math.max(40, durationTicks);
         return switch (type) {
+            case STEADY -> new Steady();
             case ORBIT -> new Orbit(orbitStartDeg);
             case FLYBY -> new Flyby(d);
             case CRANE -> new Crane(d);
@@ -188,6 +189,34 @@ public final class Shots {
                     .add(0, cfg.followHeight + 0.5, 0);
             float[] look = lookAt(cam, new Vec3(tp.x, tp.y + 1.5, tp.z));
             return new Pose(cam, look[0], look[1]);
+        }
+    }
+
+    /**
+     * Stable, world-locked follow camera: a fixed compass angle, elevation and
+     * distance from the target. It does NOT follow the target's head/view at all
+     * — only its position, and even that lazily via {@code steadyFollow}. This is
+     * the calm "documentary / IRL stream" angle: no spinning, no chasing the view.
+     */
+    static final class Steady implements Shot {
+        @Override
+        public Pose next(Player target, Pose cur, long tick, SConfig cfg) {
+            double r = Math.toRadians(cfg.steadyAngleDeg);
+            Vec3 tp = target.position();
+            Vec3 ideal = new Vec3(
+                    tp.x - Math.sin(r) * cfg.steadyDistance,
+                    tp.y + cfg.steadyHeight,
+                    tp.z + Math.cos(r) * cfg.steadyDistance);
+            Vec3 aim = new Vec3(tp.x, tp.y + cfg.steadyLookHeight, tp.z);
+            float[] look = lookAt(ideal, aim);
+            if (cur == null) return new Pose(ideal, look[0], look[1]);
+
+            double f = Mth.clamp(cfg.steadyFollow, 0.001, 1.0);
+            Vec3 cam = cur.pos().lerp(ideal, f);
+            float[] look2 = lookAt(cam, aim);
+            float yaw = cur.yaw() + Mth.wrapDegrees(look2[0] - cur.yaw()) * (float) f;
+            float pitch = cur.pitch() + (look2[1] - cur.pitch()) * (float) f;
+            return new Pose(cam, yaw, pitch);
         }
     }
 
