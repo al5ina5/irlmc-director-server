@@ -196,7 +196,10 @@ public final class DirectorServer {
         if (locked != null) {
             ServerPlayer lt = locked.resolve(server);
             boolean newTarget = s.current == null || !locked.uuid().equals(s.current.uuid());
-            if (lt != null && (newTarget || (rotate && s.ticksSinceSwitch >= interval))) {
+            // Locked target: only re-roll if the *pool* has multiple shots. Never
+            // rotate the angle just because other players are online.
+            boolean poolRotates = cfg.pool.size() > 1;
+            if (lt != null && (newTarget || (poolRotates && s.ticksSinceSwitch >= interval))) {
                 beginShot(s, locked, lt, cfg);
                 s.ticksSinceSwitch = 0;
                 s.shotTick = 0;
