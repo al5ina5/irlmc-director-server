@@ -248,7 +248,12 @@ public final class DirectorServer {
 
         ServerLevel targetLevel = target.level() instanceof ServerLevel sl ? sl : server.overworld();
         cam.setDeltaMovement(Vec3.ZERO);
-        cam.teleportTo(targetLevel, s.pose.pos().x, s.pose.pos().y, s.pose.pos().z,
+        // The client renders the camera at the spectator's EYE = feet + eyeHeight.
+        // All our shot/collision math treats s.pose as the eye position, so place
+        // the player's feet at eye - eyeHeight; otherwise the rendered camera sits
+        // ~1.6 blocks too high and the look angles aim over the target's head.
+        double eyeHeight = cam.getEyeHeight();
+        cam.teleportTo(targetLevel, s.pose.pos().x, s.pose.pos().y - eyeHeight, s.pose.pos().z,
                 EnumSet.noneOf(Relative.class), s.pose.yaw(), s.pose.pitch(), false);
         // A headless camera must never fall out of spectator or take damage:
         // a crash/restart can otherwise "restore" it into survival and kill it.
