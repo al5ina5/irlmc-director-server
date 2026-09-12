@@ -24,9 +24,33 @@ import net.neoforged.neoforge.server.ServerLifecycleHooks;
 @EventBusSubscriber(modid = IrlmcDirectorServer.MOD_ID)
 public final class DirectorServerEvents {
 
+    private static boolean rigStarted = false;
+
     @SubscribeEvent
     public static void onServerTick(ServerTickEvent.Post event) {
+        // Single-mod orchestration: on the first tick, bring the headless camera
+        // rig up (ServerStartedEvent isn't reliable across loaders/versions here).
+        // A shutdown hook takes it down when the server exits.
+        if (!rigStarted) {
+            rigStarted = true;
+            SConfig cfg = SConfig.get();
+            if (cfg.rigEnabled) {
+                RigOrchestrator.get().start(cfg.rigStart());
+                Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                    if (SConfig.get().rigEnabled) {
+                        RigOrchestrator.get().stop(SConfig.get().rigStop());
+                    }
+                }, "irlmc-rig-stop"));
+            }
+        }
         DirectorServer.get().tick(event.getServer());
+    }
+
+    /** And take it down with the server (no camera client left running). */
+    @SubscribeEvent
+    public static void onServerStopping(net.neoforged.neoforge.event.server.ServerStoppingEvent event) {
+        SConfig cfg = SConfig.get();
+        if (cfg.rigEnabled) RigOrchestrator.get().stop(cfg.rigStop());
     }
 
     @SubscribeEvent
@@ -74,6 +98,19 @@ public final class DirectorServerEvents {
                 .then(Commands.literal("afk")
                         .then(Commands.argument("seconds", IntegerArgumentType.integer(10, 3600))
                                 .executes(DirectorServerEvents::afk)))
+                .then(Commands.literal("rig")
+                        .executes(DirectorServerEvents::rigStatus)
+                        .then(Commands.literal("status").executes(DirectorServerEvents::rigStatus))
+                        .then(Commands.literal("start").executes(ctx -> {
+                            RigOrchestrator.get().start(SConfig.get().rigStart());
+                            ctx.getSource().sendSuccess(() -> Component.literal("camera rig starting"), false);
+                            return 1;
+                        }))
+                        .then(Commands.literal("stop").executes(ctx -> {
+                            RigOrchestrator.get().stop(SConfig.get().rigStop());
+                            ctx.getSource().sendSuccess(() -> Component.literal("camera rig stopping"), false);
+                            return 1;
+                        })))
                 .then(Commands.literal("target")
                         .then(Commands.argument("player", StringArgumentType.word())
                                 .suggests((ctx, b) -> SharedSuggestionProvider.suggest(
@@ -199,6 +236,15 @@ public final class DirectorServerEvents {
         SConfig.get().afkSeconds = s;
         SConfig.get().save();
         ctx.getSource().sendSuccess(() -> Component.literal("AFK timeout = " + s + "s (auto-rotation skips AFK players)"), false);
+        return 1;
+    }
+
+    private static int rigStatus(CommandContext<CommandSourceStack> ctx) {
+        SConfig c = SConfig.get();
+        ctx.getSource().sendSuccess(() -> Component.literal(
+                "camera rig: enabled=" + c.rigEnabled
+                + " running=" + RigOrchestrator.get().isRunning()
+                + " start=" + c.rigStart()), false);
         return 1;
     }
 

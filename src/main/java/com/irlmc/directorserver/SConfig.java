@@ -34,6 +34,14 @@ public final class SConfig {
     /** A player with no movement/rotation for this long is treated as AFK and
      *  skipped by the auto-rotation (as long as an active player is available). */
     public int afkSeconds = 90;
+
+    // ---- headless camera rig orchestration ----
+    /** Start/stop the headless camera rig with the server (single-mod feel). */
+    public boolean rigEnabled = true;
+    /** Script run on server start. Empty = default under the user's home. */
+    public String rigStartScript = "";
+    /** Script run on server stop. Empty = default under the user's home. */
+    public String rigStopScript = "";
     public double minRotationDistance = 5.0;
     public double orbitRadius = 4.0;
     public double orbitSpeedDegPerTick = 2.0;
@@ -112,6 +120,20 @@ public final class SConfig {
         return w == null ? 1.0 : w;
     }
 
+    /** Resolved start script (config override or default under the user's home). */
+    public String rigStart() {
+        return rigStartScript.isEmpty()
+                ? System.getProperty("user.home") + "/.local/share/irlmc-cam/start_rig.sh"
+                : rigStartScript;
+    }
+
+    /** Resolved stop script. */
+    public String rigStop() {
+        return rigStopScript.isEmpty()
+                ? System.getProperty("user.home") + "/.local/share/irlmc-cam/stop_rig.sh"
+                : rigStopScript;
+    }
+
     private String weightsString() {
         StringBuilder sb = new StringBuilder();
         for (ShotType t : ShotType.values()) {
@@ -157,6 +179,9 @@ public final class SConfig {
             rotationIntervalSec = Math.max(5, Integer.parseInt(props.getProperty("intervalSec", "20")));
             targetRotateSec = Math.max(5, Integer.parseInt(props.getProperty("targetRotateSec", "180")));
             afkSeconds = Math.max(10, Integer.parseInt(props.getProperty("afkSeconds", "90")));
+            rigEnabled = Boolean.parseBoolean(props.getProperty("rigEnabled", "true"));
+            rigStartScript = props.getProperty("rigStartScript", "").trim();
+            rigStopScript = props.getProperty("rigStopScript", "").trim();
             minRotationDistance = Double.parseDouble(props.getProperty("minDistance", "5.0"));
             orbitRadius = Double.parseDouble(props.getProperty("orbitRadius", "4.0"));
             orbitSpeedDegPerTick = Double.parseDouble(props.getProperty("orbitSpeed", "2.0"));
@@ -197,6 +222,9 @@ public final class SConfig {
         props.setProperty("intervalSec", Integer.toString(rotationIntervalSec));
         props.setProperty("targetRotateSec", Integer.toString(targetRotateSec));
         props.setProperty("afkSeconds", Integer.toString(afkSeconds));
+        props.setProperty("rigEnabled", Boolean.toString(rigEnabled));
+        props.setProperty("rigStartScript", rigStartScript);
+        props.setProperty("rigStopScript", rigStopScript);
         props.setProperty("minDistance", Double.toString(minRotationDistance));
         props.setProperty("orbitRadius", Double.toString(orbitRadius));
         props.setProperty("orbitSpeed", Double.toString(orbitSpeedDegPerTick));
