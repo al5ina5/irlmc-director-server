@@ -31,6 +31,9 @@ public final class SConfig {
     public int rotationIntervalSec = 20;
     /** Seconds between auto target switches (group mode). 180 = 3 minutes. */
     public int targetRotateSec = 180;
+    /** A player with no movement/rotation for this long is treated as AFK and
+     *  skipped by the auto-rotation (as long as an active player is available). */
+    public int afkSeconds = 90;
     public double minRotationDistance = 5.0;
     public double orbitRadius = 4.0;
     public double orbitSpeedDegPerTick = 2.0;
@@ -153,6 +156,7 @@ public final class SConfig {
             targetName = props.getProperty("targetName", "").trim();
             rotationIntervalSec = Math.max(5, Integer.parseInt(props.getProperty("intervalSec", "20")));
             targetRotateSec = Math.max(5, Integer.parseInt(props.getProperty("targetRotateSec", "180")));
+            afkSeconds = Math.max(10, Integer.parseInt(props.getProperty("afkSeconds", "90")));
             minRotationDistance = Double.parseDouble(props.getProperty("minDistance", "5.0"));
             orbitRadius = Double.parseDouble(props.getProperty("orbitRadius", "4.0"));
             orbitSpeedDegPerTick = Double.parseDouble(props.getProperty("orbitSpeed", "2.0"));
@@ -192,6 +196,7 @@ public final class SConfig {
         props.setProperty("targetName", targetName);
         props.setProperty("intervalSec", Integer.toString(rotationIntervalSec));
         props.setProperty("targetRotateSec", Integer.toString(targetRotateSec));
+        props.setProperty("afkSeconds", Integer.toString(afkSeconds));
         props.setProperty("minDistance", Double.toString(minRotationDistance));
         props.setProperty("orbitRadius", Double.toString(orbitRadius));
         props.setProperty("orbitSpeed", Double.toString(orbitSpeedDegPerTick));

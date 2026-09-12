@@ -73,6 +73,15 @@ public final class DirectorServer {
     private int roundRobin = -1;
     private boolean configLoaded = false;
 
+    /** Per-player activity, for AFK detection. */
+    private static final class Activity {
+        long lastActiveMs;
+        double x, y, z;
+        float yaw, pitch;
+        boolean init;
+    }
+    private final Map<UUID, Activity> activity = new HashMap<>();
+
     // ---- lifecycle ----
 
     public boolean isDirecting(UUID uuid) {
@@ -160,6 +169,7 @@ public final class DirectorServer {
             SConfig.get().load();
         }
         SConfig cfg = SConfig.get();
+        updateActivity(server);
         List<UUID> ids;
         synchronized (sessions) {
             ids = new ArrayList<>(sessions.keySet());
@@ -201,7 +211,15 @@ public final class DirectorServer {
                 announce(cam, s);
             }
         } else {
-            boolean stale = s.current == null || !s.current.isValid(server);
+            boolean activeAvailable = false;
+            for (DirectorTarget c : candidates) {
+                if (!isAfk(c.uuid())) {
+                    activeAvailable = true;
+                    break;
+                }
+            }
+            boolean stale = s.current == null || !s.current.isValid(server)
+                    || (activeAvailable && isAfk(s.current.uuid()));
             // Group mode: rotate the followed player on a slow timer (default 3 min),
             // separately from the shot hold. Switch with a hard cut.
             boolean targetDue = candidates.size() > 1 && s.ticksSinceSwitch >= targetInterval;
@@ -294,7 +312,8 @@ public final class DirectorServer {
     }
 
     private List<DirectorTarget> collect(MinecraftServer server, ServerPlayer cam, SConfig cfg) {
-        List<DirectorTarget> out = new ArrayList<>();
+        List<DirectorTarget> all = new ArrayList<>();
+        List<DirectorTarget> active = new ArrayList<>();
         var players = server.getPlayerList().getPlayers();
         for (ServerPlayer p : players) {
             if (p.getUUID().equals(cam.getUUID())) continue;
@@ -303,9 +322,40 @@ public final class DirectorServer {
                 // NOTE: distance filter is only a tie-break; server sees everyone.
                 continue;
             }
-            out.add(DirectorTarget.of(p));
+            DirectorTarget t = DirectorTarget.of(p);
+            all.add(t);
+            if (!isAfk(p.getUUID())) active.add(t);
         }
-        return out;
+        // Never auto-target AFK players while at least one active player exists.
+        return active.isEmpty() ? all : active;
+    }
+
+    /** Track movement/rotation per player so we can detect AFK. */
+    private void updateActivity(MinecraftServer server) {
+        long now = System.currentTimeMillis();
+        for (ServerPlayer p : server.getPlayerList().getPlayers()) {
+            Activity a = activity.computeIfAbsent(p.getUUID(), k -> new Activity());
+            if (!a.init) {
+                a.init = true;
+                a.x = p.getX(); a.y = p.getY(); a.z = p.getZ();
+                a.yaw = p.getYRot(); a.pitch = p.getXRot();
+                a.lastActiveMs = now;
+                continue;
+            }
+            double moved = Math.abs(p.getX() - a.x) + Math.abs(p.getY() - a.y) + Math.abs(p.getZ() - a.z);
+            double turned = Math.abs(Mth.wrapDegrees(p.getYRot() - a.yaw)) + Math.abs(p.getXRot() - a.pitch);
+            if (moved > 0.03 || turned > 1.5) {
+                a.lastActiveMs = now;
+            }
+            a.x = p.getX(); a.y = p.getY(); a.z = p.getZ();
+            a.yaw = p.getYRot(); a.pitch = p.getXRot();
+        }
+    }
+
+    private boolean isAfk(UUID id) {
+        Activity a = activity.get(id);
+        if (a == null) return false;
+        return System.currentTimeMillis() - a.lastActiveMs > SConfig.get().afkSeconds * 1000L;
     }
 
     private DirectorTarget lockedTarget(MinecraftServer server, SConfig cfg) {
@@ -368,6 +418,10 @@ public final class DirectorServer {
         double factor = maxScale < s.armScale ? cfg.armRetract : cfg.armExtend;
         s.armScale += (maxScale - s.armScale) * Mth.clamp(factor, 0.0, 1.0);
         s.armScale = Mth.clamp(s.armScale, 0.0, 1.0);
+        // Hard floor: never closer than armMin to the target, so the camera can
+        // never pass through / collide with the player model.
+        double minScale = Mth.clamp(cfg.armMin / idealLen, 0.0, 1.0);
+        s.armScale = Math.max(s.armScale, minScale);
 
         long now = System.currentTimeMillis();
         if (s.armScale < 0.85 && now - s.lastArmLog > 1000) {

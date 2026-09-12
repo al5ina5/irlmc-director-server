@@ -4,7 +4,7 @@ license="MIT"
 
 [[mods]]
 modId="irlmc_director_server"
-version="0.6.0"
+version="0.6.2"
 displayName="IRL-MC Director Server"
 displayURL=""
 authors="irl-mc"

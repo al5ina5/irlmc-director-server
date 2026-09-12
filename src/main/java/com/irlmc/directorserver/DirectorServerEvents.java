@@ -71,6 +71,9 @@ public final class DirectorServerEvents {
                 .then(Commands.literal("rotate")
                         .then(Commands.argument("seconds", IntegerArgumentType.integer(5, 3600))
                                 .executes(DirectorServerEvents::rotate)))
+                .then(Commands.literal("afk")
+                        .then(Commands.argument("seconds", IntegerArgumentType.integer(10, 3600))
+                                .executes(DirectorServerEvents::afk)))
                 .then(Commands.literal("target")
                         .then(Commands.argument("player", StringArgumentType.word())
                                 .suggests((ctx, b) -> SharedSuggestionProvider.suggest(
@@ -115,6 +118,10 @@ public final class DirectorServerEvents {
                         .then(Commands.literal("lowdist")
                                 .then(Commands.argument("blocks", DoubleArgumentType.doubleArg(1.0, 10.0))
                                         .executes(ctx -> camSet(ctx, "lowdist",
+                                                DoubleArgumentType.getDouble(ctx, "blocks")))))
+                        .then(Commands.literal("min")
+                                .then(Commands.argument("blocks", DoubleArgumentType.doubleArg(0.5, 6.0))
+                                        .executes(ctx -> camSet(ctx, "min",
                                                 DoubleArgumentType.getDouble(ctx, "blocks")))))
                         .then(Commands.literal("align")
                                 .then(Commands.argument("factor", DoubleArgumentType.doubleArg(0.005, 1.0))
@@ -187,6 +194,14 @@ public final class DirectorServerEvents {
         return 1;
     }
 
+    private static int afk(CommandContext<CommandSourceStack> ctx) {
+        int s = IntegerArgumentType.getInteger(ctx, "seconds");
+        SConfig.get().afkSeconds = s;
+        SConfig.get().save();
+        ctx.getSource().sendSuccess(() -> Component.literal("AFK timeout = " + s + "s (auto-rotation skips AFK players)"), false);
+        return 1;
+    }
+
     private static int target(CommandContext<CommandSourceStack> ctx) {
         String name = StringArgumentType.getString(ctx, "player");
         var server = ctx.getSource().getServer();
@@ -232,6 +247,7 @@ public final class DirectorServerEvents {
             case "aim" -> c.camAimHeight = value;
             case "lowheight" -> c.camLowHeight = value;
             case "lowdist" -> c.camLowDistance = value;
+            case "min" -> c.armMin = value;
             default -> { }
         }
         c.save();
